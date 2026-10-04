@@ -249,7 +249,7 @@
 
     <div class="cat-grid" id="catGrid">
       <div class="cat-tile" data-cat="shashlik" style="background-color:#4a2416;"><span>Шашлык</span></div>
-      <div class="cat-tile active" data-cat="sets" style="background-color:#3a2a1c;"><span>Сеты</span></div>
+      <div class="cat-tile" data-cat="sets" style="background-color:#3a2a1c;"><span>Сеты</span></div>
       <div class="cat-tile" data-cat="snacks" style="background-color:#3d3320;"><span>Закуски</span></div>
       <div class="cat-tile" data-cat="shawarma" style="background-color:#5c3a1e;"><span>Шаурма</span></div>
       <div class="cat-tile" data-cat="lyulya" style="background-color:#2f2620;"><span>Люля-кебаб</span></div>
@@ -1114,28 +1114,14 @@ function fillAddressFromProfile(){
   toast('Адрес подставлен из профиля');
 }
 
-let currentCategoryShown = 'sets';
+// По умолчанию (пока клиент не выбрал конкретную группу) меню показывает
+// все позиции сразу, разбитые на секции в этом фиксированном порядке.
+const MENU_CATEGORY_ORDER = ['sets','shashlik','lyulya','shawarma','snacks','drinks'];
+const MENU_CATEGORY_LABELS = {sets:'Сеты', shashlik:'Шашлык', lyulya:'Люля-кебаб', shawarma:'Шаурма', snacks:'Закуски', drinks:'Напитки'};
 
-function renderMenu(cat){
-  currentCategoryShown = cat;
-  const list = document.getElementById('menuList');
-  list.innerHTML = '';
-  const labels = {sets:'Сеты', shashlik:'Шашлык', lyulya:'Люля-кебаб', shawarma:'Шаурма', snacks:'Закуски', drinks:'Напитки'};
-  const lbl = document.createElement('div');
-  lbl.className='section-label'; lbl.textContent = labels[cat];
-  list.appendChild(lbl);
+let currentCategoryShown = 'all';
 
-  if(menuLoadError){
-    list.innerHTML += '<div class="dish-desc" style="display:block; padding:12px 0;">Не удалось загрузить меню с сервера. <span style="color:var(--red-600); text-decoration:underline; cursor:pointer;" onclick="loadMenuFromBackend().then(()=>renderMenu(\'' + cat + '\'))">Повторить</span></div>';
-    return;
-  }
-
-  const itemsInCat = MENU.filter(m=>m.cat===cat);
-  if(!itemsInCat.length){
-    list.innerHTML += '<div class="dish-desc" style="display:block; padding:12px 0;">В этой категории пока нет блюд</div>';
-    return;
-  }
-
+function buildDishGrid(itemsInCat){
   const grid = document.createElement('div');
   grid.className = 'dish-grid';
   itemsInCat.forEach(m=>{
@@ -1159,7 +1145,44 @@ function renderMenu(cat){
       <button class="to-cart-btn" onclick="quickAdd('${m.id}')">В корзину</button>`;
     grid.appendChild(card);
   });
-  list.appendChild(grid);
+  return grid;
+}
+
+function renderMenu(cat){
+  currentCategoryShown = cat;
+  const list = document.getElementById('menuList');
+  list.innerHTML = '';
+
+  if(menuLoadError){
+    list.innerHTML = '<div class="dish-desc" style="display:block; padding:12px 0;">Не удалось загрузить меню с сервера. <span style="color:var(--red-600); text-decoration:underline; cursor:pointer;" onclick="loadMenuFromBackend().then(()=>renderMenu(\'' + cat + '\'))">Повторить</span></div>';
+    return;
+  }
+
+  if(cat === 'all'){
+    MENU_CATEGORY_ORDER.forEach(c=>{
+      const itemsInCat = MENU.filter(m=>m.cat===c);
+      if(!itemsInCat.length) return; // пустые категории в общем списке не показываем
+      const lbl = document.createElement('div');
+      lbl.className='section-label'; lbl.textContent = MENU_CATEGORY_LABELS[c];
+      list.appendChild(lbl);
+      list.appendChild(buildDishGrid(itemsInCat));
+    });
+    if(!list.children.length){
+      list.innerHTML = '<div class="dish-desc" style="display:block; padding:12px 0;">В меню пока нет блюд</div>';
+    }
+    return;
+  }
+
+  const lbl = document.createElement('div');
+  lbl.className='section-label'; lbl.textContent = MENU_CATEGORY_LABELS[cat];
+  list.appendChild(lbl);
+
+  const itemsInCat = MENU.filter(m=>m.cat===cat);
+  if(!itemsInCat.length){
+    list.innerHTML += '<div class="dish-desc" style="display:block; padding:12px 0;">В этой категории пока нет блюд</div>';
+    return;
+  }
+  list.appendChild(buildDishGrid(itemsInCat));
 }
 
 function toggleDesc(id){
@@ -2562,7 +2585,7 @@ function toast(msg){
 }
 
 document.getElementById('menuList').innerHTML = '<div class="dish-desc" style="display:block; padding:12px 0;">Загружаем меню…</div>';
-loadMenuFromBackend().then(()=>renderMenu('sets'));
+loadMenuFromBackend().then(()=>renderMenu('all'));
 loadCashbackPercent();
 // Если с этого устройства уже был выполнен вход — восстанавливаем его
 // без повторного запроса SMS-кода.
