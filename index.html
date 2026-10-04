@@ -1128,7 +1128,7 @@ function buildDishGrid(itemsInCat){
     const card = document.createElement('div');
     card.className='dish-card';
     const photoInner = m.photo
-      ? `<img src="${m.photo}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`
+      ? `<img src="${m.photo}" style="width:100%; height:100%; object-fit:contain; border-radius:12px;">`
       : m.icon;
     card.innerHTML = `
       <div class="dish-photo" onclick="toggleDesc('${m.id}')">${photoInner}</div>
