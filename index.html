@@ -2409,12 +2409,22 @@ async function renderOrdersScreen(){
   const current = orders.filter(o => o.status < 3).sort((a,b)=> b.createdAt.localeCompare(a.createdAt));
   const past = orders.filter(o => o.status === 3).sort((a,b)=> b.createdAt.localeCompare(a.createdAt));
 
-  currentBox.innerHTML = current.length ? current.map(o => `
+  currentBox.innerHTML = current.length ? current.map(o => {
+    // Карточка из компактной истории (customerOrderHistoryStore) не
+    // содержит paymentStatus вообще — но раз запись там появилась, заказ
+    // уже точно оплачен (история пишется только для оплаченных заказов).
+    // Полный объект заказа (из GET /api/orders/:id, пока клиент ещё в
+    // этой сессии) может быть и "awaiting_payment"/"failed" — тогда
+    // метку "Оплачен" показывать рано.
+    const isCardPaid = o.paymentMethod === 'card' && o.paymentStatus !== 'awaiting_payment' && o.paymentStatus !== 'failed';
+    const paidLabel = isCardPaid ? ' · <span style="color:#2a9d4a; font-weight:700;">Оплачен</span>' : '';
+    return `
     <div class="dish-card" onclick="reopenOrderStatus('${o.id}')" style="cursor:pointer;">
-      <div class="dish-name">Заказ №${o.dailyNumber} · <span style="color:#2a9d4a;">${o.statusStep}</span></div>
+      <div class="dish-name">Заказ №${o.dailyNumber} · <span style="color:#2a9d4a;">${o.statusStep}</span>${paidLabel}</div>
       <div class="dish-desc">${(o.items||[]).map(it=>it.name+' ×'+it.qty).join(', ')}</div>
       <div class="dish-bottom" style="margin:0;"><div class="dish-price">${o.total} ₽</div></div>
-    </div>`).join('') : '<div class="dish-desc" style="display:block;">Нет заказов в работе</div>';
+    </div>`;
+  }).join('') : '<div class="dish-desc" style="display:block;">Нет заказов в работе</div>';
 
   pastBox.innerHTML = past.length ? past.map(o => `
     <div class="dish-card" onclick="openOrderDetail('${o.id}')" style="cursor:pointer;">
