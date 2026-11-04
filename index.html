@@ -2346,6 +2346,30 @@ function ensureBackendSocket(){
 // (statusTitle/statusSub уже готовы на бэкенде) — это безопаснее, чем
 // брать их по индексу локально, так как сервер может прислать заказ
 // в состоянии "ожидает подтверждения кассиром" (ещё не принят).
+let lastServerOrder = null;
+// Когда курьер уже выехал, вместо «Курьер уже в пути…» показываем примерное время доставки (из Яндекс.Доставки)
+function renderStatusSub(order){
+  const sub = document.getElementById('statusSub');
+  if(!sub || !order) return;
+  let mins = null;
+  if(order.deliveryMethod === 'delivery' && order.status === 2 && order.deliveryEtaAt){
+    mins = Math.max(0, Math.round((new Date(order.deliveryEtaAt).getTime() - Date.now()) / 60000));
+  }
+  if(mins !== null){
+    sub.textContent = mins > 0 ? 'Примерное время доставки: через ' + mins + ' ' + pluralMinutes(mins) : 'Примерное время доставки: с минуты на минуту';
+    sub.style.cssText = 'font-family:var(--font-logo); font-weight:900; font-size:19px; color:#2a9d4a; margin-top:4px;';
+  } else {
+    sub.textContent = order.statusSub;
+    sub.style.cssText = '';
+  }
+}
+function pluralMinutes(n){
+  const m10 = n % 10, m100 = n % 100;
+  if(m10 === 1 && m100 !== 11) return 'минуту';
+  if(m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'минуты';
+  return 'минут';
+}
+setInterval(() => { if(lastServerOrder && lastServerOrder.status === 2) renderStatusSub(lastServerOrder); }, 30000);
 function applyServerOrder(order){
   document.getElementById('statusOrderTitle').textContent = 'ЗАКАЗ №' + order.dailyNumber;
   const steps = document.querySelectorAll('#statusTrack .status-step');
@@ -2356,7 +2380,8 @@ function applyServerOrder(order){
   });
   ORDER_STEP_LABELS[order.deliveryMethod].forEach((lbl, idx)=>{ document.getElementById('stepLabel'+idx).textContent = lbl; });
   document.getElementById('statusTitle').textContent = order.statusTitle;
-  document.getElementById('statusSub').textContent = order.statusSub;
+  lastServerOrder = order;
+  renderStatusSub(order);
 
   document.getElementById('statusOrderItems').innerHTML = (order.items||[]).map(it=>{
     const priceText = (it.price !== undefined && it.price !== null) ? (it.price * it.qty) + ' ₽' : '';
