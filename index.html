@@ -1241,12 +1241,26 @@ function updateCartBar(){
   if(count>0) bar.classList.add('show'); else bar.classList.remove('show');
 }
 
+// Изменить количество блюда в корзине на +1 / −1; при нуле блюдо убирается
+function changeCartQty(id, delta){
+  const entry = cart[id];
+  if(!entry) return;
+  entry.qty += delta;
+  if(entry.qty <= 0){
+    const name = entry.item.name;
+    delete cart[id];
+    toast(name + ' удалён из корзины');
+  }
+  updateCartBar();
+  renderCartItems();
+}
 function removeFromCart(id){
+  const entry = cart[id];
+  if(!entry) return;
   delete cart[id];
   updateCartBar();
   renderCartItems();
-  const item = MENU.find(m=>m.id===id);
-  toast(item.name + ' удалён из корзины');
+  toast(entry.item.name + ' удалён из корзины');
 }
 
 function openItem(id){
@@ -1302,7 +1316,11 @@ function renderCartItems(){
   entries.forEach(e=>{
     const row = document.createElement('div');
     row.className='row-line';
-    row.innerHTML = `<span>${e.item.name} ×${e.qty}</span><span style="display:flex; align-items:center; gap:10px;"><b>${e.item.price*e.qty} ₽</b><button onclick="removeFromCart(${e.item.id})" style="width:22px; height:22px; border-radius:50%; border:1.5px solid var(--gray-200); background:var(--white); color:var(--red-600); font-size:13px; font-weight:800; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;">✕</button></span>`;
+    const btnStyle = 'width:26px; height:26px; border-radius:50%; border:1.5px solid var(--gray-200); background:var(--white); color:var(--ink-900); font-size:16px; font-weight:800; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;';
+    row.innerHTML = `<span style="flex:1; min-width:0;">${escapeHtmlAddr(e.item.name)}</span><span style="display:flex; align-items:center; gap:8px;"><button type="button" data-act="minus" aria-label="Убавить" style="${btnStyle}">−</button><b style="min-width:18px; text-align:center;">${e.qty}</b><button type="button" data-act="plus" aria-label="Добавить" style="${btnStyle}">+</button><b style="min-width:64px; text-align:right;">${e.item.price*e.qty} ₽</b></span>`;
+    // id блюда — строка (UUID), поэтому кнопки навешиваются через обработчики, а не через inline-вызов с id в коде
+    row.querySelector('[data-act="minus"]').addEventListener('click', () => changeCartQty(e.item.id, -1));
+    row.querySelector('[data-act="plus"]').addEventListener('click', () => changeCartQty(e.item.id, 1));
     wrap.appendChild(row);
   });
   const itemsTotal = entries.reduce((s,e)=>s+e.qty*e.item.price,0);
@@ -1449,10 +1467,13 @@ function setPayment(el, method){
 
 function toggleSelfPickup(){
   const checked = document.getElementById('selfPickupCheck').checked;
-  document.getElementById('fieldMyPhone').style.display = checked ? 'block' : 'none';
-  document.getElementById('fieldRecipientPhone').style.display = checked ? 'none' : 'block';
-  if(checked){
-    document.getElementById('myPhoneValue').textContent = (userProfile.registered && userProfile.phone) ? userProfile.phone : PROFILE_PHONE;
+  // Свой номер берём из профиля. Если клиент не вошёл в профиль, номера у нас нет —
+  // поэтому поле телефона остаётся: курьеру нужен реальный номер.
+  const haveOwnPhone = !!(userProfile.registered && userProfile.phone);
+  document.getElementById('fieldMyPhone').style.display = (checked && haveOwnPhone) ? 'block' : 'none';
+  document.getElementById('fieldRecipientPhone').style.display = (checked && haveOwnPhone) ? 'none' : 'block';
+  if(checked && haveOwnPhone){
+    document.getElementById('myPhoneValue').textContent = userProfile.phone;
   }
 }
 
@@ -1513,6 +1534,8 @@ function autoGrowTextarea(el){
 // Бесплатная доставка (сумма блюд больше 1500 ₽) работает как раньше.
 const FREE_DELIVERY_FROM = 1500;
 const DEFAULT_DELIVERY_FEE = 200; // запасная цена, если расчёт недоступен
+// Показывать ли под ценой доставки подпись «Рассчитано по вашему адресу». Сейчас скрыта; чтобы вернуть — поставить true.
+const SHOW_QUOTE_NOTE = false;
 let deliveryQuote = { key: '', status: 'idle' }; // status: idle | loading | ok | unavailable | error
 let deliveryQuoteTimer = null, deliveryQuoteSeq = 0;
 function currentAddressKey(){
@@ -1562,7 +1585,7 @@ function computeDeliveryFee(itemsTotal){
   const q = (deliveryQuote.key && deliveryQuote.key === currentAddressKey()) ? deliveryQuote : { status: 'idle' };
   if(q.status === 'ok'){
     const eta = q.eta ? ' · около ' + Math.round(q.eta) + ' мин' : '';
-    return { fee: q.price, label: q.price + ' ₽', note: q.fallback ? '' : 'Рассчитано по вашему адресу' + eta };
+    return { fee: q.price, label: q.price + ' ₽', note: q.fallback ? 'Стандартная стоимость доставки (расчёт по адресу временно недоступен)' : (SHOW_QUOTE_NOTE ? 'Рассчитано по вашему адресу' + eta : '') };
   }
   if(q.status === 'loading') return { fee: DEFAULT_DELIVERY_FEE, label: 'считаем…', pending: true, note: 'Считаем стоимость доставки по вашему адресу' };
   if(q.status === 'unavailable') return { fee: 0, label: 'недоступна', blocked: true, note: q.message };
@@ -1965,6 +1988,11 @@ function clearInvalid(id){
   document.getElementById(id).classList.remove('invalid');
 }
 
+// Телефон из профиля, если клиент сам получает заказ и вошёл в профиль; иначе вводится вручную
+function deliveryOwnPhone(){
+  return (document.getElementById('selfPickupCheck').checked && userProfile.registered && userProfile.phone) ? userProfile.phone : '';
+}
+
 function validateDeliveryAddress(){
   if(deliveryMode !== 'delivery') return true;
   let ok = true;
@@ -1972,9 +2000,9 @@ function validateDeliveryAddress(){
   const house = document.getElementById('inputHouse').value.trim();
   if(!street){ document.getElementById('fieldStreet').classList.add('invalid'); ok = false; }
   if(!house){ document.getElementById('fieldHouse').classList.add('invalid'); ok = false; }
-  if(!document.getElementById('selfPickupCheck').checked){
+  if(!deliveryOwnPhone()){
     const recipientPhone = document.getElementById('inputRecipientPhone').value.trim();
-    if(!recipientPhone){ document.getElementById('fieldRecipientPhone').classList.add('invalid'); ok = false; }
+    if(recipientPhone.replace(/\D/g, '').length < 10){ document.getElementById('fieldRecipientPhone').classList.add('invalid'); ok = false; }
   }
   return ok;
 }
@@ -1990,7 +2018,8 @@ function buildDeliveryExtra(itemsTotal){
     address: 'Волгоград, ' + street + ', д. ' + house + (flat ? ', кв. ' + flat : ''),
     deliveryAddress: { street, house, flat },
     quoteId: q ? q.quoteId : undefined,
-    recipientName: (userProfile && userProfile.name) || undefined
+    recipientName: (userProfile && userProfile.name) || undefined,
+    recipientPhone: deliveryOwnPhone() || document.getElementById('inputRecipientPhone').value.trim() || undefined
   };
 }
 
@@ -2020,7 +2049,7 @@ function placeOrder(){
   let customerPhone = null;
   if(userProfile.registered && userProfile.phone){
     customerPhone = userProfile.phone;
-  } else if(deliveryMode === 'delivery' && !document.getElementById('selfPickupCheck').checked){
+  } else if(deliveryMode === 'delivery'){
     const recipientPhone = document.getElementById('inputRecipientPhone').value.trim();
     if(recipientPhone) customerPhone = recipientPhone;
   }
