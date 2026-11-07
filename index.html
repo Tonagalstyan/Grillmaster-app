@@ -380,7 +380,7 @@
         <div class="status-title" style="font-size:16px;">Платёж не прошёл</div>
         <div class="status-sub" style="margin-bottom:16px;" id="paymentErrorSub">Банк отклонил операцию. Попробуйте ещё раз или выберите другой способ оплаты.</div>
         <button class="primary-btn" style="margin-bottom:8px;" onclick="retryCardPayment()"><span>Повторить оплату</span><span>↻</span></button>
-        <button class="ghost-btn" onclick="switchToCashAndRetry()">Оплатить наличными</button>
+        <button class="ghost-btn" id="switchToCashBtn" onclick="switchToCashAndRetry()">Оплатить наличными</button>
       </div>
     </div>
   </div>
@@ -409,7 +409,7 @@
       <div class="section-label">Оплата</div>
       <div class="list-item"><div class="txt"><b>Картой на сайте</b></div></div>
       <div class="list-item"><div class="txt"><b>Картой, QR-кодом или наличными на кассе</b><small>при самовывозе</small></div></div>
-      <div class="list-item"><div class="txt"><b>Наличными, картой курьеру</b><small>при доставке</small></div></div>
+      <div class="list-item" id="infoCashDelivery"><div class="txt"><b>Наличными, картой курьеру</b><small>при доставке</small></div></div>
 
       <div style="margin-top:18px;">
         <a class="ghost-btn" href="https://go.2gis.com/m3N6M" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; background:#2a9d4a; border-color:#2a9d4a; color:var(--white);">Посмотреть на карте</a>
@@ -679,8 +679,8 @@
 
       <div class="section-label">Оплата</div>
       <div class="segmented">
-        <div class="active" onclick="setPayment(this,'card')">Картой</div>
-        <div onclick="setPayment(this,'cash')">Наличными</div>
+        <div class="active" id="payCardOption" onclick="setPayment(this,'card')">Картой</div>
+        <div id="payCashOption" onclick="setPayment(this,'cash')">Наличными</div>
       </div>
 
       <div id="promoSection" style="display:none;">
@@ -728,6 +728,7 @@ const CATEGORY_FALLBACK_ICON = {
 };
 
 let promoCodesEnabled = false;
+let cashPaymentEnabled = true;
 
 async function loadCashbackPercent(){
   try{
@@ -737,11 +738,14 @@ async function loadCashbackPercent(){
       cashbackPercent = data.cashbackPercent;
     }
     promoCodesEnabled = !!data.promoCodesEnabled;
+    cashPaymentEnabled = data.cashPaymentEnabled !== false;
   } catch(err){
     console.warn('Не удалось загрузить настройки бонусов, используем запасные значения:', err);
   }
   const label = document.getElementById('cashbackPercentText');
   if(label) label.textContent = cashbackPercent + '% кэшбэк бонусами';
+
+  applyCashPaymentAvailability();
 
   const promoSection = document.getElementById('promoSection');
   if(promoSection){
@@ -1457,6 +1461,18 @@ function setMode(el, mode){
   document.getElementById('deliveryField').style.display = mode==='delivery' ? 'block':'none';
   document.getElementById('deliveryRow').style.display = mode==='delivery' ? 'flex':'none';
   if(mode === 'delivery') scheduleDeliveryQuote(); else renderCartItems();
+}
+
+// Если администратор отключил оплату наличными — оставляем клиенту только «Картой»
+function applyCashPaymentAvailability(){
+  const cashBtn = document.getElementById('payCashOption');
+  const cardBtn = document.getElementById('payCardOption');
+  if(cashBtn) cashBtn.style.display = cashPaymentEnabled ? '' : 'none';
+  const switchBtn = document.getElementById('switchToCashBtn');
+  if(switchBtn) switchBtn.style.display = cashPaymentEnabled ? '' : 'none';
+  const infoCash = document.getElementById('infoCashDelivery');
+  if(infoCash) infoCash.style.display = cashPaymentEnabled ? '' : 'none';
+  if(!cashPaymentEnabled && paymentMethod === 'cash' && cardBtn){ setPayment(cardBtn, 'card'); }
 }
 
 function setPayment(el, method){
@@ -2481,6 +2497,14 @@ async function sendOrderToBackendAndTrack(mode, items, itemsTotal, deliveryFee, 
       toast(e.error || 'По этому адресу доставка недоступна — выберите самовывоз');
       showScreen('menu');
       return;
+    }
+    if(res.status === 409){
+      const e = await res.json().catch(() => ({}));
+      if(e.code === 'cash_disabled'){
+        cashPaymentEnabled = false; applyCashPaymentAvailability();
+        toast(e.error || 'Оплата наличными сейчас недоступна. Выберите оплату картой.');
+        return;
+      }
     }
     if(!res.ok) throw new Error('Сервер ответил ошибкой');
     const order = await res.json();
