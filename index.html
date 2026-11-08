@@ -2160,6 +2160,12 @@ async function registerAndRedirectToAlfa(orderId){
   try{
     const res = await fetch(BACKEND_URL + '/api/payments/alfa/register/' + orderId, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
+    if(res.status === 409 && data.code === 'already_paid' && data.order){
+      // Заказ уже оплачен картой (например, оплата дошла с задержкой) — второй раз платить не нужно
+      cardPaymentContext = null; pendingOrder = null;
+      finishUiAfterPaidOrder(data.order, 'Оплата прошла успешно');
+      return;
+    }
     if(!res.ok || !data.formUrl) throw new Error(data.error || 'register_failed');
     window.location.href = data.formUrl;
   } catch(err){
@@ -2182,9 +2188,13 @@ async function confirmAlfaPayment(orderId){
       cardPaymentContext = null;
       pendingOrder = null;
       finishUiAfterPaidOrder(order, 'Оплата прошла успешно' + (order.bonusEarned > 0 ? '. Начислим ' + order.bonusEarned + ' ₽ бонусами после получения заказа' : ''));
+    } else if(order.paymentStatus === 'awaiting_payment'){
+      // Банк ещё не подтвердил оплату — это не отказ: возможно, платёж обрабатывается.
+      // Не предлагаем платить второй раз, а даём проверить оплату ещё раз.
+      showCardPaymentError('Банк ещё обрабатывает оплату. Подождите минуту и нажмите «Повторить» — мы проверим снова. Платить второй раз не нужно.', { phase: 'confirm', orderId: order.id });
     } else {
-      // Банк не подтвердил оплату (отклонена/отменена) — даём повторить
-      // оплату для того же заказа или перейти на наличные.
+      // Банк отклонил/отменил оплату — даём повторить оплату для того же заказа
+      // или перейти на наличные.
       showCardPaymentError('Банк отклонил операцию. Попробуйте ещё раз или выберите оплату наличными.', { phase: 'register', orderId: order.id });
     }
   } catch(err){
@@ -2217,12 +2227,28 @@ async function switchToCashAndRetry(){
   showPaymentProcessing('Переключаем на наличные', 'Секунду…');
   try{
     const res = await fetch(BACKEND_URL + '/api/payments/alfa/switch-to-cash/' + orderId, { method: 'POST' });
+    if(res.status === 409){
+      const info = await res.json().catch(() => ({}));
+      if(info.code === 'payment_pending'){
+        showCardPaymentError(info.error || 'Банк ещё обрабатывает платёж — подождите минуту и проверьте оплату.', { phase: 'confirm', orderId });
+        return;
+      }
+      if(info.code === 'cash_disabled'){
+        showCardPaymentError(info.error || 'Оплата наличными сейчас недоступна.', { phase: 'register', orderId });
+        return;
+      }
+    }
     if(!res.ok) throw new Error('switch_failed');
     const order = await res.json();
-    paymentMethod = 'cash';
     cardPaymentContext = null;
     pendingOrder = null;
-    finishUiAfterPaidOrder(order, 'Оплата переключена на «Наличными»');
+    if(order.paymentMethod === 'card'){
+      // Пока клиент переключался, банк подтвердил оплату картой — заказ оплачен картой
+      finishUiAfterPaidOrder(order, 'Оплата картой прошла успешно');
+    } else {
+      paymentMethod = 'cash';
+      finishUiAfterPaidOrder(order, 'Оплата переключена на «Наличными»');
+    }
   } catch(err){
     console.warn('Не удалось переключить заказ на наличные:', err);
     showCardPaymentError('Не удалось переключить оплату на наличные. Попробуйте ещё раз.', { phase: 'register', orderId });
