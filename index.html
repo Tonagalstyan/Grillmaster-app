@@ -545,8 +545,9 @@
     <div class="sheet-body">
       <div class="section-label" style="font-size:18px; margin-top:4px;">Введите код из SMS</div>
       <div class="dish-desc" id="authCodeSubtitle" style="display:block; margin-bottom:14px;">Код отправлен на +7 ...</div>
-      <div class="field" id="fieldAuthCode"><span class="req">Код из SMS</span><input type="tel" id="authCodeInput" placeholder="Любые 4 цифры (демо)" maxlength="4" oninput="clearInvalid('fieldAuthCode')"></div>
-      <button class="primary-btn" onclick="confirmSmsCode()"><span>Подтвердить</span><span>→</span></button>
+      <div class="field" id="fieldAuthCode"><span class="req">Код из SMS</span><input type="tel" id="authCodeInput" placeholder="6 цифр из SMS" maxlength="6" inputmode="numeric" autocomplete="one-time-code" oninput="clearInvalid('fieldAuthCode')"></div>
+      <button class="primary-btn" id="authCodeSubmit" onclick="confirmSmsCode()"><span>Подтвердить</span><span>→</span></button>
+      <button class="ghost-btn" id="authResendBtn" style="margin-top:10px;" onclick="resendSmsCode()">Отправить код ещё раз</button>
       <button class="ghost-btn" style="margin-top:10px;" onclick="closeAuthCode(); openAuthPhone(isPhoneEditFlow);">Изменить номер</button>
     </div>
   </div>
@@ -817,10 +818,22 @@ let cashbackPercent = 10; // запасное значение на случай
 // "Выйти" в профиле удаляет этот номер, и при следующем запуске
 // приложение снова покажет гостевой экран.
 const CUSTOMER_SESSION_KEY = 'gm_customer_phone';
+const CUSTOMER_TOKEN_KEY = 'gm_customer_token';
 
+// Подтверждение личности — токен, который сервер выдаёт после проверки SMS-кода.
+// Все запросы к личным данным (профиль, бонусы, история, push) идут с ним; номер
+// телефона сервер берёт только из токена, так что чужие данные открыть нельзя.
+let authToken = null;
+try{ authToken = localStorage.getItem(CUSTOMER_TOKEN_KEY); }catch(err){ authToken = null; }
+
+function setAuthToken(token){
+  authToken = token || null;
+  try{ if(token) localStorage.setItem(CUSTOMER_TOKEN_KEY, token); else localStorage.removeItem(CUSTOMER_TOKEN_KEY); }
+  catch(err){ /* localStorage недоступен — токен живёт до закрытия вкладки */ }
+}
 function saveSessionPhone(phone){
   try{ localStorage.setItem(CUSTOMER_SESSION_KEY, phone); }
-  catch(err){ /* localStorage недоступен (приватный режим и т.п.) — просто не запоминаем сессию между визитами */ }
+  catch(err){ /* приватный режим и т.п. */ }
 }
 function getSessionPhone(){
   try{ return localStorage.getItem(CUSTOMER_SESSION_KEY); }
@@ -829,23 +842,42 @@ function getSessionPhone(){
 function clearSessionPhone(){
   try{ localStorage.removeItem(CUSTOMER_SESSION_KEY); }
   catch(err){ /* ignore */ }
+  setAuthToken(null);
 }
 
-// При запуске приложения пытаемся автоматически восстановить вход по
-// сохранённому номеру телефона, без повторного запроса SMS-кода.
+// fetch с токеном клиента. Если сервер ответил 401 (токен просрочен/недействителен) —
+// локально выходим из профиля и просим войти заново.
+async function authFetch(path, opts){
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers || {});
+  if(authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const res = await fetch(BACKEND_URL + path, Object.assign({}, opts, { headers }));
+  if(res.status === 401 && authToken && !path.startsWith('/api/auth/')){
+    sessionExpired();
+  }
+  return res;
+}
+function sessionExpired(){
+  if(!userProfile.registered && !authToken) return;
+  userProfile = { registered:false, name:'', phone:'', birthday:'', birthdayChanged:false };
+  savedAddresses = [];
+  bonusBalance = 0;
+  clearSessionPhone();
+  renderProfileScreen();
+  toast('Сессия закончилась — войдите по SMS-коду снова');
+}
+
+// При запуске приложения пытаемся автоматически восстановить вход по сохранённому
+// токену, без повторного запроса SMS-кода.
 async function tryRestoreSession(){
-  const phone = getSessionPhone();
-  if(!phone) return;
-  const existing = await loadProfileFromServer(phone);
+  if(!authToken) return;
+  const existing = await loadProfileFromServer();
   if(existing){
     userProfile.registered = true;
-    userProfile.phone = phone;
+    userProfile.phone = existing.phone || getSessionPhone() || '';
     userProfile.name = existing.name || 'Гость';
     renderProfileScreen();
     syncProfileUIFromState();
-  } else {
-    // Профиль на сервере не нашёлся (например, удалён) — сессию не восстанавливаем
-    clearSessionPhone();
   }
 }
 
@@ -922,10 +954,10 @@ async function enablePushNotifications(){
       });
     }
 
-    await fetch(BACKEND_URL + '/api/push/subscribe', {
+    await authFetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: userProfile.phone, subscription: subscription.toJSON() })
+      body: JSON.stringify({ subscription: subscription.toJSON() })
     });
     return true;
   } catch(err){
@@ -945,10 +977,10 @@ async function disablePushNotifications(){
     const endpoint = subscription.endpoint;
     await subscription.unsubscribe();
     if(userProfile.phone){
-      await fetch(BACKEND_URL + '/api/push/unsubscribe', {
+      await authFetch('/api/push/unsubscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: userProfile.phone, endpoint })
+        body: JSON.stringify({ endpoint })
       });
     }
   } catch(err){
@@ -960,9 +992,9 @@ async function disablePushNotifications(){
 // сервере по номеру телефона. Как только клиент подтверждает номер
 // по SMS, мы подтягиваем его сохранённые данные — если он уже
 // заходил раньше, ему не нужно регистрироваться заново.
-async function loadProfileFromServer(phone){
+async function loadProfileFromServer(){
   try{
-    const res = await fetch(BACKEND_URL + '/api/customers/' + encodeURIComponent(phone));
+    const res = await authFetch('/api/me');
     if(!res.ok) return null; // 404 — это новый клиент, профиля ещё нет
     const data = await res.json();
     savedAddresses = data.addresses || [];
@@ -982,7 +1014,7 @@ async function loadProfileFromServer(phone){
 async function saveProfileToServer(){
   if(!userProfile.phone) return; // гостю сохранять некуда — у него ещё нет номера
   try{
-    const res = await fetch(BACKEND_URL + '/api/customers/' + encodeURIComponent(userProfile.phone), {
+    const res = await authFetch('/api/me', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: userProfile.name, birthday: userProfile.birthday, addresses: savedAddresses, pushSettings })
@@ -1416,10 +1448,10 @@ async function applyPromoCode(){
   const itemsTotal = Object.values(cart).reduce((s,e)=>s+e.qty*e.item.price,0);
   const phone = (userProfile.registered && userProfile.phone) ? userProfile.phone : '';
   try{
-    const res = await fetch(BACKEND_URL + '/api/bonus/validate-promo', {
+    const res = await authFetch('/api/bonus/validate-promo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, phone, itemsTotal })
+      body: JSON.stringify({ code, itemsTotal })
     });
     const result = await res.json();
     if(!result.valid){
@@ -1761,16 +1793,56 @@ function closeAuthPhone(){
   document.getElementById('authPhoneSheet').classList.remove('show');
 }
 
-function requestSmsCode(){
+let smsResendTimer = null;
+function startResendCooldown(seconds){
+  const btn = document.getElementById('authResendBtn');
+  if(!btn) return;
+  clearInterval(smsResendTimer);
+  let left = seconds;
+  const tick = () => {
+    if(left > 0){ btn.disabled = true; btn.textContent = 'Отправить код ещё раз (' + left + ' с)'; left--; }
+    else { btn.disabled = false; btn.textContent = 'Отправить код ещё раз'; clearInterval(smsResendTimer); }
+  };
+  tick();
+  smsResendTimer = setInterval(tick, 1000);
+}
+
+// Просит сервер отправить SMS-код. Возвращает true, если код отправлен.
+async function sendSmsCodeRequest(phone){
+  try{
+    const res = await fetch(BACKEND_URL + '/api/auth/request-code', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone })
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok){
+      toast(data.error || 'Не удалось отправить код. Попробуйте позже.');
+      if(res.status === 429 && data.retryAfter) startResendCooldown(data.retryAfter);
+      return false;
+    }
+    startResendCooldown(data.resendAfter || 60);
+    if(data.devCode) toast('Режим разработки, код: ' + data.devCode); // приходит только если на сервере не настроен SMS.ru
+    return true;
+  } catch(err){
+    toast('Нет связи с сервером. Проверьте интернет.');
+    return false;
+  }
+}
+
+async function requestSmsCode(){
   const phone = document.getElementById('authPhoneInput').value.trim();
   if(!phone){ document.getElementById('fieldAuthPhone').classList.add('invalid'); toast('Введите номер телефона'); return; }
+  const ok = await sendSmsCodeRequest(phone);
+  if(!ok) return;
   pendingPhone = phone;
   closeAuthPhone();
   document.getElementById('authCodeSubtitle').textContent = 'Код отправлен на ' + pendingPhone;
   document.getElementById('authCodeInput').value = '';
   document.getElementById('authCodeBackdrop').classList.add('show');
   document.getElementById('authCodeSheet').classList.add('show');
-  toast('Демо: подойдут любые 4 цифры');
+}
+async function resendSmsCode(){
+  const ok = await sendSmsCodeRequest(pendingPhone);
+  if(ok) toast('Код отправлен ещё раз');
 }
 function closeAuthCode(){
   document.getElementById('authCodeBackdrop').classList.remove('show');
@@ -1779,24 +1851,44 @@ function closeAuthCode(){
 
 async function confirmSmsCode(){
   const code = document.getElementById('authCodeInput').value.trim();
-  if(code.length !== 4){ document.getElementById('fieldAuthCode').classList.add('invalid'); toast('Введите 4-значный код'); return; }
+  if(!/^\d{6}$/.test(code)){ document.getElementById('fieldAuthCode').classList.add('invalid'); toast('Введите 6-значный код из SMS'); return; }
+  const submit = document.getElementById('authCodeSubmit');
+  if(submit) submit.disabled = true;
+  let data = null, res = null;
+  try{
+    // Смена номера: нужен действующий вход И код, присланный на новый номер.
+    res = await authFetch(isPhoneEditFlow ? '/api/auth/change-phone' : '/api/auth/verify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: pendingPhone, code })
+    });
+    data = await res.json().catch(() => ({}));
+  } catch(err){
+    if(submit) submit.disabled = false;
+    toast('Нет связи с сервером. Проверьте интернет.');
+    return;
+  }
+  if(submit) submit.disabled = false;
+  if(!res.ok){
+    document.getElementById('fieldAuthCode').classList.add('invalid');
+    toast(data.error || 'Не удалось проверить код');
+    return;
+  }
   closeAuthCode();
+  clearInterval(smsResendTimer);
+  setAuthToken(data.token);
+  pendingPhone = data.phone; // сервер приводит номер к единому виду
+  saveSessionPhone(pendingPhone);
   if(isPhoneEditFlow){
     userProfile.phone = pendingPhone;
-    saveSessionPhone(pendingPhone);
     renderProfileScreen();
-    saveProfileToServer();
     toast('Номер телефона обновлён');
     return;
   }
-  // Проверяем: если по этому номеру уже есть сохранённый профиль —
-  // это возвращающийся клиент, регистрацию заново проходить не нужно.
-  const existing = await loadProfileFromServer(pendingPhone);
+  // Если по этому номеру уже есть сохранённый профиль — это возвращающийся клиент.
+  const existing = await loadProfileFromServer();
   if(existing){
     userProfile.registered = true;
     userProfile.phone = pendingPhone;
     userProfile.name = existing.name || 'Гость';
-    saveSessionPhone(pendingPhone);
     renderProfileScreen();
     syncProfileUIFromState();
     toast('С возвращением, ' + userProfile.name + '!');
@@ -2136,7 +2228,7 @@ async function beginCardPayment(){
   const { bonusUsed, mode, items, itemsTotal, deliveryFee, discount, total, isDrinksOnly, comment, customerPhone, promoCode, deliveryExtra } = pendingOrder;
   showPaymentProcessing('Создаём заказ', 'Секунду…');
   try{
-    const res = await fetch(BACKEND_URL + '/api/orders', {
+    const res = await authFetch('/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.assign({ items, itemsTotal, deliveryFee, discount, total, deliveryMethod: mode, paymentMethod: 'card', isDrinksOnly, comment, customerPhone, bonusUsed, promoCode }, deliveryExtra || {}))
@@ -2527,7 +2619,7 @@ async function sendOrderToBackendAndTrack(mode, items, itemsTotal, deliveryFee, 
     // сервер всегда пересчитывает сам (см. комментарий в server.js).
     // paymentMethod здесь всегда 'cash' — оплата картой онлайн идёт через
     // beginCardPayment()/registerAndRedirectToAlfa() выше, отдельным путём.
-    const res = await fetch(BACKEND_URL + '/api/orders', {
+    const res = await authFetch('/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.assign({ items, itemsTotal, deliveryFee, discount, total, deliveryMethod: mode, paymentMethod, isDrinksOnly, comment, customerPhone, bonusUsed, promoCode }, deliveryExtra || {}))
@@ -2568,7 +2660,7 @@ function formatOrderMoscowDateTime(iso){
 // Заказы берутся из двух источников и объединяются (без дублей по id):
 //  1. myOrderIds — заказы, оформленные в ТЕКУЩЕЙ сессии (полные объекты,
 //     по id) — нужно для гостей без входа и для только что оформленного заказа;
-//  2. история на сервере (/api/customers/:phone/orders) — компактные
+//  2. история на сервере (/api/me/orders) — компактные
 //     записи, доступны только вошедшим в профиль клиентам, но зато не
 //     пропадают при закрытии приложения/смене сессии (см. тот самый
 //     "сохранённый вход" — работает вместе с этой историей).
@@ -2582,7 +2674,7 @@ async function fetchMyOrders(){
 
   if(userProfile.registered && userProfile.phone){
     try{
-      const res = await fetch(BACKEND_URL + '/api/customers/' + encodeURIComponent(userProfile.phone) + '/orders');
+      const res = await authFetch('/api/me/orders');
       if(res.ok){
         const history = await res.json();
         const knownIds = new Set(combined.map(o => o.id));
