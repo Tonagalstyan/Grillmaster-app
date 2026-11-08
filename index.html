@@ -697,6 +697,8 @@
         <input type="checkbox" id="useBonusCheck" style="width:18px; height:18px;" onclick="event.stopPropagation(); renderCartItems()">
       </div>
 
+      <div id="guestBonusHint" onclick="closeCart(); showTab('profile')" style="display:none; margin:-2px 0 12px; padding:9px 12px; border-radius:10px; background:#fff4e0; color:#8a5a00; font-size:12.5px; font-weight:700; line-height:1.35; cursor:pointer;">Войдите в Профиль, чтобы получить бонусы за этот заказ</div>
+
       <div class="section-label">Итого</div>
       <div class="row-line"><span>Блюда</span><b id="sumItems">990 ₽</b></div>
       <div class="row-line" id="deliveryRow" style="display:none;"><span>Доставка</span><b id="deliveryFeeValue">200 ₽</b></div>
@@ -1361,6 +1363,9 @@ function renderCartItems(){
   // Bonus redemption
   const useBonusCheck = document.getElementById('useBonusCheck');
   document.getElementById('bonusUseLabel').textContent = 'Доступно ' + bonusBalance + ' ₽';
+  // Гость (не вошёл в профиль) не копит бонусы — подсказываем войти
+  const guestHint = document.getElementById('guestBonusHint');
+  if(guestHint) guestHint.style.display = (userProfile.registered && userProfile.phone) ? 'none' : 'block';
   const afterPromo = Math.max(itemsTotal + deliveryFee - promoDiscount, 0);
   let bonusUsed = 0;
   if(useBonusCheck.checked){
