@@ -190,6 +190,7 @@
   .field textarea{ width:100%; border:none; outline:none; background:transparent; font-family:inherit; font-size:13.5px; color:var(--ink-900); padding:0; resize:none; display:block; overflow:hidden; line-height:1.35;}
   .field textarea::placeholder{ color:var(--gray-500);}
   .field.invalid{ border-color:var(--red-600);}
+  #authConsentBlock.invalid{ outline:1.5px solid var(--red-600); border-radius:10px; padding:6px;}
 
   /* Выпадающий список подсказок адреса (DaData, только по Волгограду) */
   .addr-suggest-list{
@@ -354,10 +355,12 @@
       <div id="profileSettingsSection" style="display:none;">
         <div class="section-label">Настройки</div>
         <div class="list-item"><div class="txt" style="flex:1;"><b>Уведомление о статусе заказа</b><small>Когда заказ принят, готовится и готов к выдаче</small></div><div class="toggle on" id="toggleOrderStatus" onclick="togglePush(this,'orderStatus')"></div></div>
-        <div class="list-item"><div class="txt" style="flex:1;"><b>Акции и новости</b><small>Скидки, промокоды, новинки меню</small></div><div class="toggle on" id="togglePromo" onclick="togglePush(this,'promo')"></div></div>
+        <div class="list-item"><div class="txt" style="flex:1;"><b>Акции и новости</b><small>Скидки, промокоды, новинки меню. По умолчанию выключено — включая, вы даёте согласие на рекламную рассылку</small></div><div class="toggle" id="togglePromo" onclick="togglePush(this,'promo')"></div></div>
         <div class="list-item" style="cursor:pointer;" onclick="openAddressBook()"><div class="txt" style="flex:1;"><b>Адреса доставки</b><small id="addressBookSubtitle">Нет сохранённых адресов</small></div><span style="color:var(--gray-500); font-size:16px;">›</span></div>
       </div>
       <button id="profileLogoutSection" class="ghost-btn" style="display:none; margin-top:14px; color:var(--red-600); border-color:var(--red-600);" onclick="logoutProfile()">Выйти из профиля</button>
+      <button id="profileDeleteSection" class="ghost-btn" style="display:none; margin-top:10px; font-size:12.5px; color:var(--gray-500);" onclick="openDeleteProfile()">Удалить профиль и данные</button>
+      <div style="text-align:center; margin:16px 0 4px; font-size:12px; color:var(--gray-500);"><a href="#" onclick="openLegal(LEGAL_POLICY_URL); return false;" style="color:var(--gray-500);">Политика конфиденциальности</a></div>
     </div>
     <div class="tabbar">
       <div class="tab" data-tab="menu" onclick="showTab('menu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.5 2v6M15.5 2v6M8.5 8a3 3 0 0 0 7 0"/><path d="M12 8v14"/></svg><span>Меню</span></div>
@@ -534,7 +537,29 @@
       <div class="section-label" style="font-size:18px; margin-top:4px;">Вход по номеру телефона</div>
       <div class="dish-desc" style="display:block; margin-bottom:14px;">Отправим код подтверждения по SMS</div>
       <div class="field" id="fieldAuthPhone"><span class="req">Номер телефона</span><input type="tel" id="authPhoneInput" placeholder="+7 ..." oninput="formatPhoneInput(this); clearInvalid('fieldAuthPhone')"></div>
+      <div id="authConsentBlock" style="margin:2px 0 14px;">
+        <label style="display:flex; gap:10px; align-items:flex-start; font-size:12.5px; line-height:1.4; color:var(--ink-700); margin-bottom:10px; cursor:pointer;">
+          <input type="checkbox" id="authConsentCheck" style="width:18px; height:18px; flex-shrink:0; margin-top:1px;" onchange="clearInvalid('authConsentBlock')">
+          <span>Я даю <a href="#" onclick="openLegal(LEGAL_CONSENT_URL); return false;" style="color:var(--red-600);">согласие на обработку персональных данных</a> и ознакомлен(а) с <a href="#" onclick="openLegal(LEGAL_POLICY_URL); return false;" style="color:var(--red-600);">Политикой конфиденциальности</a></span>
+        </label>
+        <label style="display:flex; gap:10px; align-items:flex-start; font-size:12.5px; line-height:1.4; color:var(--ink-700); cursor:pointer;">
+          <input type="checkbox" id="authAdsCheck" style="width:18px; height:18px; flex-shrink:0; margin-top:1px;">
+          <span>Хочу получать акции и новости (необязательно). <a href="#" onclick="openLegal(LEGAL_ADS_CONSENT_URL); return false;" style="color:var(--red-600);">Согласие на рекламную рассылку</a></span>
+        </label>
+      </div>
       <button class="primary-btn" onclick="requestSmsCode()"><span>Получить код</span><span>→</span></button>
+    </div>
+  </div>
+
+  <!-- DELETE PROFILE SHEET -->
+  <div class="sheet-backdrop" id="deleteProfileBackdrop" onclick="closeDeleteProfile()"></div>
+  <div class="sheet" id="deleteProfileSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-body">
+      <div class="section-label" style="font-size:18px; margin-top:4px;">Удалить профиль?</div>
+      <div class="dish-desc" style="display:block; margin-bottom:14px;">Мы удалим ваше имя, дату рождения, адрес, историю заказов и подписки на уведомления. Накопленные бонусы и персональные промокоды будут потеряны, восстановить их нельзя. Обезличенные данные о заказах сохранятся для учёта.</div>
+      <button class="primary-btn" id="deleteProfileConfirmBtn" style="background:var(--red-600);" onclick="confirmDeleteProfile()"><span>Удалить навсегда</span><span>✓</span></button>
+      <button class="ghost-btn" style="margin-top:10px;" onclick="closeDeleteProfile()">Отмена</button>
     </div>
   </div>
 
@@ -676,6 +701,10 @@
         </div>
         <div class="field" id="fieldMyPhone" style="display:none;"><span>Ваш номер телефона</span><b id="myPhoneValue"></b></div>
         <div class="field" id="fieldRecipientPhone"><span class="req">Номер телефона получателя заказа</span><input type="tel" id="inputRecipientPhone" placeholder="+7 ..." oninput="clearInvalid('fieldRecipientPhone')"></div>
+        <label class="field" id="fieldCheckoutConsent" style="display:none; align-items:flex-start; gap:10px; font-size:12.5px; line-height:1.4; cursor:pointer;">
+          <input type="checkbox" id="checkoutConsentCheck" style="width:18px; height:18px; flex-shrink:0; margin-top:1px;" onchange="clearInvalid('fieldCheckoutConsent')">
+          <span>Я даю <a href="#" onclick="openLegal(LEGAL_CONSENT_URL); return false;" style="color:var(--red-600);">согласие на обработку персональных данных</a> (адрес и телефон нужны для доставки) и ознакомлен(а) с <a href="#" onclick="openLegal(LEGAL_POLICY_URL); return false;" style="color:var(--red-600);">Политикой конфиденциальности</a></span>
+        </label>
       </div>
 
       <div class="section-label">Оплата</div>
@@ -805,7 +834,13 @@ let pendingPhone = '';
 let pendingRegistrationName = '';
 let pendingBirthdayChange = null;
 let isPhoneEditFlow = false;
-let pushSettings = { orderStatus:true, promo:true };
+// Юридические документы (152-ФЗ). Замените адреса на реальные страницы сайта, где
+// опубликованы Политика и тексты согласий (должны открываться без входа в приложение).
+const LEGAL_POLICY_URL = 'https://grillmaster34.ru/privacy';
+const LEGAL_CONSENT_URL = 'https://grillmaster34.ru/privacy#consent';
+const LEGAL_ADS_CONSENT_URL = 'https://grillmaster34.ru/privacy#ads-consent';
+let authConsent = null; // { consent:true, adsConsent:bool } — отметки с экрана входа, для повторной отправки кода
+let pushSettings = { orderStatus:true, promo:false };
 let savedAddresses = []; // клиенту разрешён только один сохранённый адрес доставки
 let editingSavedAddress = false;
 let bonusBalance = 0;
@@ -890,7 +925,7 @@ async function logoutProfile(){
   }
   userProfile = { registered:false, name:'', phone:'', birthday:'', birthdayChanged:false };
   savedAddresses = [];
-  pushSettings = { orderStatus:true, promo:true };
+  pushSettings = { orderStatus:true, promo:false };
   bonusBalance = 0;
   clearSessionPhone();
   renderProfileScreen();
@@ -998,7 +1033,7 @@ async function loadProfileFromServer(){
     if(!res.ok) return null; // 404 — это новый клиент, профиля ещё нет
     const data = await res.json();
     savedAddresses = data.addresses || [];
-    pushSettings = data.pushSettings || { orderStatus:true, promo:true };
+    pushSettings = data.pushSettings || { orderStatus:true, promo:false };
     userProfile.birthday = data.birthday || '';
     userProfile.birthdayChanged = !!data.birthdayChanged;
     bonusBalance = data.bonusBalance || 0;
@@ -1491,6 +1526,12 @@ function isCartDrinksOnly(){
   return entries.length > 0 && entries.every(e => e.item.cat === 'drinks');
 }
 
+// Гость (без входа в профиль) при доставке оставляет адрес и телефон — нужно отдельное согласие.
+function updateCheckoutConsentVisibility(){
+  const f = document.getElementById('fieldCheckoutConsent');
+  if(f) f.style.display = (deliveryMode === 'delivery' && !userProfile.registered) ? 'flex' : 'none';
+}
+
 function setMode(el, mode){
   if(mode === 'delivery' && isCartDrinksOnly()){
     toast('Заказ только из напитков доступен исключительно на самовывоз');
@@ -1502,6 +1543,7 @@ function setMode(el, mode){
   applyCashPaymentAvailability();
   document.getElementById('pickupField').style.display = mode==='pickup' ? 'block':'none';
   document.getElementById('deliveryField').style.display = mode==='delivery' ? 'block':'none';
+  updateCheckoutConsentVisibility();
   document.getElementById('deliveryRow').style.display = mode==='delivery' ? 'flex':'none';
   if(mode === 'delivery') scheduleDeliveryQuote(); else renderCartItems();
 }
@@ -1545,7 +1587,9 @@ function renderProfileScreen(){
   const reg = document.getElementById('profileRegisteredView');
   const settings = document.getElementById('profileSettingsSection');
   const logoutSection = document.getElementById('profileLogoutSection');
+  const deleteSection = document.getElementById('profileDeleteSection');
   if(userProfile.registered){
+    if(deleteSection) deleteSection.style.display = 'block';
     guest.style.display = 'none';
     reg.style.display = 'flex';
     settings.style.display = 'block';
@@ -1564,7 +1608,9 @@ function renderProfileScreen(){
     reg.style.display = 'none';
     settings.style.display = 'none';
     logoutSection.style.display = 'none';
+    if(deleteSection) deleteSection.style.display = 'none';
   }
+  if(typeof updateCheckoutConsentVisibility === 'function') updateCheckoutConsentVisibility();
 }
 
 function openAuthPhone(editMode){
@@ -1572,8 +1618,51 @@ function openAuthPhone(editMode){
   const phoneInput = document.getElementById('authPhoneInput');
   phoneInput.value = editMode ? userProfile.phone : '';
   formatPhoneInput(phoneInput); // приводим к маске "+7 (XXX) XXX-XX-XX", даже если старое значение было в другом формате
+  const consentBlock = document.getElementById('authConsentBlock');
+  if(consentBlock){
+    consentBlock.style.display = editMode ? 'none' : 'block'; // при смене номера согласие уже дано
+    consentBlock.classList.remove('invalid');
+  }
   document.getElementById('authPhoneBackdrop').classList.add('show');
   document.getElementById('authPhoneSheet').classList.add('show');
+}
+
+function openLegal(url){ window.open(url, '_blank', 'noopener'); }
+
+function openDeleteProfile(){
+  document.getElementById('deleteProfileBackdrop').classList.add('show');
+  document.getElementById('deleteProfileSheet').classList.add('show');
+}
+function closeDeleteProfile(){
+  document.getElementById('deleteProfileBackdrop').classList.remove('show');
+  document.getElementById('deleteProfileSheet').classList.remove('show');
+}
+async function confirmDeleteProfile(){
+  const btn = document.getElementById('deleteProfileConfirmBtn');
+  if(btn) btn.disabled = true;
+  try{
+    const res = await authFetch('/api/me', { method:'DELETE', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ confirm:true }) });
+    const data = await res.json().catch(() => ({}));
+    if(btn) btn.disabled = false;
+    if(!res.ok){
+      if(res.status === 401) { closeDeleteProfile(); return; } // sessionExpired уже сработал
+      toast(data.error || 'Не удалось удалить профиль. Попробуйте позже.');
+      return;
+    }
+  } catch(err){
+    if(btn) btn.disabled = false;
+    toast('Нет связи с сервером. Проверьте интернет.');
+    return;
+  }
+  closeDeleteProfile();
+  try{ await disablePushNotifications(); } catch(err){ /* не критично */ }
+  userProfile = { registered:false, name:'', phone:'', birthday:'', birthdayChanged:false };
+  savedAddresses = [];
+  pushSettings = { orderStatus:true, promo:false };
+  bonusBalance = 0;
+  clearSessionPhone();
+  renderProfileScreen();
+  toast('Профиль и персональные данные удалены');
 }
 // Авто-высота для textarea комментария к заказу: пока видимая часть
 // строки не заполнена, поле однострочное; как только текст доходит до
@@ -1810,8 +1899,9 @@ function startResendCooldown(seconds){
 // Просит сервер отправить SMS-код. Возвращает true, если код отправлен.
 async function sendSmsCodeRequest(phone){
   try{
-    const res = await fetch(BACKEND_URL + '/api/auth/request-code', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone })
+    const payload = Object.assign({ phone }, (!isPhoneEditFlow && authConsent) ? authConsent : {});
+    const res = await authFetch('/api/auth/request-code', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
     const data = await res.json().catch(() => ({}));
     if(!res.ok){
@@ -1831,6 +1921,14 @@ async function sendSmsCodeRequest(phone){
 async function requestSmsCode(){
   const phone = document.getElementById('authPhoneInput').value.trim();
   if(!phone){ document.getElementById('fieldAuthPhone').classList.add('invalid'); toast('Введите номер телефона'); return; }
+  if(!isPhoneEditFlow){
+    if(!document.getElementById('authConsentCheck').checked){
+      document.getElementById('authConsentBlock').classList.add('invalid');
+      toast('Нужно согласие на обработку персональных данных');
+      return;
+    }
+    authConsent = { consent:true, adsConsent: document.getElementById('authAdsCheck').checked };
+  }
   const ok = await sendSmsCodeRequest(phone);
   if(!ok) return;
   pendingPhone = phone;
@@ -1933,6 +2031,7 @@ function completeRegistration(){
   userProfile.phone = pendingPhone;
   userProfile.name = name;
   userProfile.birthday = birthday;
+  pushSettings.promo = !!(authConsent && authConsent.adsConsent); // реклама — только если клиент сам поставил галочку
   saveSessionPhone(pendingPhone);
   closeAuthBirthday();
   renderProfileScreen();
@@ -2127,6 +2226,9 @@ function validateDeliveryAddress(){
     const recipientPhone = document.getElementById('inputRecipientPhone').value.trim();
     if(recipientPhone.replace(/\D/g, '').length < 10){ document.getElementById('fieldRecipientPhone').classList.add('invalid'); ok = false; }
   }
+  if(!userProfile.registered && !document.getElementById('checkoutConsentCheck').checked){
+    document.getElementById('fieldCheckoutConsent').classList.add('invalid'); ok = false;
+  }
   return ok;
 }
 
@@ -2150,7 +2252,7 @@ let pendingOrder = null;
 
 function placeOrder(){
   if(!Object.keys(cart).length){ toast('Добавьте блюда в корзину'); return; }
-  if(!validateDeliveryAddress()){ toast('Заполните улицу, дом и телефон получателя'); return; }
+  if(!validateDeliveryAddress()){ toast('Заполните улицу, дом, телефон получателя и дайте согласие на обработку данных'); return; }
 
   const entries = Object.values(cart);
   const itemsTotal = entries.reduce((s,e)=>s+e.qty*e.item.price,0);
